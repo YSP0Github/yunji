@@ -1,0 +1,2 @@
+[console_scripts]
+yunji = yunji.editor:cli_editor
