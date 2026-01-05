@@ -32,6 +32,7 @@ class TextEditor(QPlainTextEdit):
         self.setFont(font)
         self.current_font_size = font.pointSize()
         self.initial_font_size = self.current_font_size
+        self.new_font_size = self.current_font_size
 
     def lineNumberAreaWidth(self):
         if not self.line_numbers_visible:
@@ -143,51 +144,46 @@ class TextEditor(QPlainTextEdit):
 
     def document_modified(self):
         if self.document().isModified() and self.parent:
-            self.parent.status_label_doc.setText("文档状态: 已修改")
-            self.parent.update_file_size()
-            self.is_saved = False  # 文本更改后，设置未保存标志
+            try:
+                self.parent.handle_document_modified()
+            except Exception as exc:
+                print(f"更新文档状态时发生错误: {exc}")
 
     def keyPressEvent(self, event):
         super(TextEditor, self).keyPressEvent(event)
-        if event.key() == Qt.Key_Insert:
-            self.parent.update_insert_overwrite_mode()
+        if event.key() == Qt.Key_Insert and self.parent:
+            try:
+                self.parent.update_insert_overwrite_mode()
+            except AttributeError:
+                pass
 
     def contextMenuEvent(self, event):
-        # 创建右键菜单
-        menu = QMenu(self)
-
-        # 添加默认的剪切、复制、粘贴等操作
-        menu.addAction(self.createStandardAction(QTextEdit.cut))
-        menu.addAction(self.createStandardAction(QTextEdit.copy))
-        menu.addAction(self.createStandardAction(QTextEdit.paste))
-
-        # 添加自定义操作
-        custom_action = QAction("自定义操作", self)
-        custom_action.triggered.connect(self.custom_action_triggered)
-        menu.addAction(custom_action)
-
-        # 显示菜单
-        menu.exec_(event.globalPos())
+        try:
+            menu = self.createStandardContextMenu()
+            menu.addSeparator()
+            custom_action = QAction("自定义操作", self)
+            custom_action.triggered.connect(self.custom_action_triggered)
+            menu.addAction(custom_action)
+            menu.exec_(event.globalPos())
+        except Exception as exc:
+            print(f"右键菜单创建失败: {exc}")
 
     def custom_action_triggered(self):
-        selected_text = self.textCursor().selectedText()
-        if selected_text:
-            # 使用正则表达式查找URL
-            url_pattern = r"(https?://[^\s]+)"  # 匹配 http 或 https 开头的链接
-            urls = re.findall(url_pattern, selected_text)
-
-            if urls:
-                for url in urls:
-                    print(f"检测到的链接: {url}")
-                    webbrowser.open(url)  # 使用默认浏览器打开链接
+        try:
+            selected_text = self.textCursor().selectedText()
+            if selected_text:
+                url_pattern = r"(https?://[^\s]+)"
+                urls = re.findall(url_pattern, selected_text)
+                if urls:
+                    for url in urls:
+                        print(f"检测到的链接: {url}")
+                        webbrowser.open(url)
+                else:
+                    print("选中的文本中没有检测到链接")
             else:
-                print("选中的文本中没有检测到链接")
-        else:
-            print("没有选中的文本")
-
-    def createStandardAction(self, action_type):
-        action = self.createStandardContextMenu().actions()[action_type]
-        return action
+                print("没有选中的文本")
+        except Exception as exc:
+            print(f"自定义操作执行失败: {exc}")
     
 class LineNumberArea(QWidget):
     def __init__(self, editor):
@@ -289,6 +285,8 @@ class YunjiEditor(QMainWindow):
         self.temp_file = None
         self.child_windows = []  # 存储子窗口实例的列表
         self.is_saved = True  # 用于跟踪文件是否已保存
+        self.encoding = 'utf-8'
+        self.find_cache = {"key": None, "matches": []}
         self.text_edit.textChanged.connect(self.on_text_changed)
         if filename:
             self.open_file(filename)
@@ -358,8 +356,12 @@ class YunjiEditor(QMainWindow):
         self.status_label_os_info.setContentsMargins(10, 0, 10, 0)
 
         # 将标签添加到状态栏
+        self.status_label_insert_mode = QLabel("INS")
+        self.status_label_insert_mode.setContentsMargins(10, 0, 10, 0)
+
         self.status_bar.addWidget(self.status_label_filepath, 3)
         self.status_bar.addWidget(self.status_label_line, 1)
+        self.status_bar.addWidget(self.status_label_insert_mode, 1)
         self.status_bar.addWidget(self.status_label_zoom, 1)
         self.status_bar.addWidget(self.status_label_encoding, 1)
         self.status_bar.addWidget(self.status_label_file_size, 1)
@@ -378,6 +380,7 @@ class YunjiEditor(QMainWindow):
 
         layout.addWidget(self.text_edit)
         layout.setContentsMargins(5, 0, 5, 0)
+        self.update_insert_overwrite_mode()
 
         # 设置图标路径
         icon_base_path = os.path.join(os.path.dirname(__file__), "images")
@@ -562,43 +565,36 @@ class YunjiEditor(QMainWindow):
 
     def wheelEvent(self, event):
         self.text_edit.wheelEvent(event)
-   
+
     def open_file_dialog(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, '打开文件', '', '所有文件 (*);;文本文件 (*.txt)')
-        if file_path:
-            self.open_file(file_path)
-    
+        try:
+            file_path, _ = QFileDialog.getOpenFileName(self, '打开文件', '', '所有文件 (*);;文本文件 (*.txt)')
+            if file_path:
+                self.open_file(file_path)
+        except Exception as exc:
+            self.show_error_dialog('打开文件', f'无法打开文件对话框: {exc}')
+
     def open_file(self, file_path):
-        self.file_path = file_path
-
-        # 首先尝试使用 UTF-8 编码打开文件
+        if not file_path:
+            return
         try:
-            with open(file_path, 'r', encoding='utf-8') as file:
-                content = file.read()
-                self.encoding = 'utf-8'
-        except UnicodeDecodeError:
-            # 如果 UTF-8 解码失败，使用 chardet 进行编码检测
-            with open(self.file_path, 'rb') as file:
-                raw_data = file.read()  # 读取整个文件内容以进行准确的编码检测
-                result = chardet.detect(raw_data)
-                self.encoding = result['encoding']
-            
-            # 再次尝试用检测到的编码打开文件
-            with open(file_path, 'r', encoding=self.encoding) as file:
-                content = file.read()
-
-        try:
+            content, detected_encoding = self._read_file_with_fallback(file_path)
+            self.file_path = file_path
+            self.encoding = detected_encoding
             self.text_edit.setPlainText(content)
             self.filename_label.setText(os.path.basename(file_path))
             self.status_label_filepath.setText(f'打开文件: {file_path}')
             self.status_label_doc.setText("文档状态: 已打开")
             self.status_label_encoding.setText(self.encoding)
+            self.update_file_size()
+            self.is_saved = True
+            self.reset_find_cache()
         except FileNotFoundError:
-            QMessageBox.critical(self, "File Error", f"文件 '{os.path.basename(file_path)}' 不存在.")
-            self.clear_text_edit()  # 清空文本编辑器内容或者执行其他回滚操作
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"无法打开文件 '{os.path.basename(file_path)}': {str(e)}")
-            self.clear_text_edit()  # 清空文本编辑器内容或者执行其他回滚操作
+            QMessageBox.critical(self, "文件错误", f"文件 '{os.path.basename(file_path)}' 不存在.")
+            self.clear_text_edit()
+        except Exception as exc:
+            self.show_error_dialog("打开文件", f"无法打开文件 '{os.path.basename(file_path)}': {exc}")
+            self.clear_text_edit()
 
     def clear_text_edit(self):
         self.text_edit.clear()
@@ -607,182 +603,211 @@ class YunjiEditor(QMainWindow):
         self.status_label_doc.setText("文档状态: 未修改")
 
     def save_file(self):
-        if self.file_path:
-            with open(self.file_path, 'w', encoding=self.encoding) as file:
+        if not self.file_path:
+            self.save_file_as()
+            return
+        try:
+            with open(self.file_path, 'w', encoding=self.encoding or 'utf-8') as file:
                 file.write(self.text_edit.toPlainText())
             self.filename_label.setText(os.path.basename(self.file_path))
             self.status_label_filepath.setText(f'保存文件: {self.file_path}')
             self.status_label_doc.setText("文档状态: 已保存")
-            self.is_saved = True  # 设置已保存标志
-        else:
-            self.save_file_as()
+            self.is_saved = True
+            self.update_file_size()
+        except Exception as exc:
+            self.show_error_dialog('保存文件', f'保存失败: {exc}')
 
     def save_file_as(self):
-        file_path, _ = QFileDialog.getSaveFileName(self, '另存为', '', '文本文件 (*.txt);;所有文件 (*)')
-        if file_path:
-            self.file_path = file_path
-            with open(file_path, 'w', encoding=self.encoding) as file:
-                file.write(self.text_edit.toPlainText())
-            self.filename_label.setText(os.path.basename(file_path))
-            self.status_label_filepath.setText(f'另存文件: {file_path}')
-            self.status_label_doc.setText("文档状态: 已保存")
-            self.is_saved = True  # 设置已保存标志
+        try:
+            file_path, _ = QFileDialog.getSaveFileName(self, '另存为', '', '文本文件 (*.txt);;所有文件 (*)')
+            if file_path:
+                self.file_path = file_path
+                self.save_file()
+        except Exception as exc:
+            self.show_error_dialog('另存为', f'无法另存文件: {exc}')
 
     def new_window(self):
-        new_window = YunjiEditor()
-        self.child_windows.append(new_window)
-        new_window.show()
+        try:
+            new_window = YunjiEditor()
+            self.child_windows.append(new_window)
+            new_window.show()
+        except Exception as exc:
+            self.show_error_dialog('新建窗口', f'无法打开新的编辑窗口: {exc}')
 
     def find_text(self):
-        if hasattr(self, 'find_dialog') and self.find_dialog.isVisible():
-            self.find_dialog.close()
-        selected_text = self.text_edit.textCursor().selectedText()
-        self.find_dialog = FindReplaceDialog(self, initial_text=selected_text)  # 创建查找/替换对话框实例，传入选中的文本
-        
-        self.find_dialog.find_button.clicked.connect(self.find_next_text)
-        self.find_dialog.show()  # 显示非模态对话框
-
-        # 更新结果标签
-        self.update_result_label()
+        try:
+            if hasattr(self, 'find_dialog') and self.find_dialog.isVisible():
+                self.find_dialog.close()
+            selected_text = self.text_edit.textCursor().selectedText()
+            self.find_dialog = FindReplaceDialog(self, initial_text=selected_text)
+            self.find_dialog.find_button.clicked.connect(self.find_next_text)
+            self.find_dialog.show()
+            self.update_result_label(force_recount=True)
+        except Exception as exc:
+            self.show_error_dialog('查找', f'无法打开查找窗口: {exc}')
 
     def replace_text(self):
-        if hasattr(self, 'find_dialog') and self.find_dialog.isVisible():
-            self.find_dialog.close()
-        selected_text = self.text_edit.textCursor().selectedText()
-        self.find_dialog = FindReplaceDialog(self, True, initial_text=selected_text)  # 创建查找/替换对话框实例，传入选中的文本
-        
-        self.find_dialog.find_button.clicked.connect(self.find_next_text)
-        self.find_dialog.replace_button.clicked.connect(self.replace_next_text)
-        self.find_dialog.replace_all_button.clicked.connect(self.replace_all_text)
-        self.find_dialog.show()  # 显示非模态对话框
-
-        # 更新结果标签
-        self.update_result_label()
+        try:
+            if hasattr(self, 'find_dialog') and self.find_dialog.isVisible():
+                self.find_dialog.close()
+            selected_text = self.text_edit.textCursor().selectedText()
+            self.find_dialog = FindReplaceDialog(self, True, initial_text=selected_text)
+            self.find_dialog.find_button.clicked.connect(self.find_next_text)
+            self.find_dialog.replace_button.clicked.connect(self.replace_next_text)
+            self.find_dialog.replace_all_button.clicked.connect(self.replace_all_text)
+            self.find_dialog.show()
+            self.update_result_label(force_recount=True)
+        except Exception as exc:
+            self.show_error_dialog('替换', f'无法打开替换窗口: {exc}')
 
     def find_next_text(self):
-        find_str, _, case_sensitive, whole_words = self.find_dialog.get_find_replace_texts()
-        if find_str:
-            flags = QTextDocument.FindFlags()
-            if case_sensitive:
-                flags |= QTextDocument.FindCaseSensitively
-            if whole_words:
-                flags |= QTextDocument.FindWholeWords
-
-            # 获取查找方向
-            if self.find_dialog.direction_combobox.currentText() == "向上查找":
+        if not hasattr(self, 'find_dialog'):
+            return
+        try:
+            find_str, _, case_sensitive, whole_words = self.find_dialog.get_find_replace_texts()
+            if not find_str:
+                self.update_result_label(force_recount=True)
+                return
+            flags = self._build_find_flags(case_sensitive, whole_words)
+            backward = self.find_dialog.direction_combobox.currentText() == "向上查找"
+            if backward:
                 flags |= QTextDocument.FindBackward
 
-            cursor = self.text_edit.textCursor()
             document = self.text_edit.document()
-            cursor = document.find(find_str, cursor, flags)
-            if cursor.isNull():
-                # 如果查找不到，从文档的另一端重新查找一次
-                if flags & QTextDocument.FindBackward:
+            cursor = self.text_edit.textCursor()
+            match_cursor = document.find(find_str, cursor, flags)
+            if match_cursor.isNull():
+                cursor = QTextCursor(document)
+                if backward:
                     cursor.movePosition(QTextCursor.End)
                 else:
                     cursor.movePosition(QTextCursor.Start)
-
-                cursor = document.find(find_str, cursor, flags)
-                if cursor.isNull():
-                    QMessageBox.information(self, '查找', f'这已经是第一个 "{find_str}"')
-                    self.update_result_label(0, 0)
-                else:
-                    self.text_edit.setTextCursor(cursor)  # 文中高亮显示
-                    self.update_result_label(cursor)
-            else:
-                self.text_edit.setTextCursor(cursor)
-                self.update_result_label(cursor)
+                match_cursor = document.find(find_str, cursor, flags)
+                if match_cursor.isNull():
+                    QMessageBox.information(self, '查找', f'未找到 "{find_str}"')
+                    self.update_result_label(force_recount=True)
+                    return
+            self.text_edit.setTextCursor(match_cursor)
+            self.update_result_label(match_cursor)
+        except Exception as exc:
+            self.show_error_dialog('查找', f'查找失败: {exc}')
 
     def replace_next_text(self):
-        find_str, replace_str, case_sensitive, whole_words = self.find_dialog.get_find_replace_texts()
-        if find_str:
-            flags = QTextDocument.FindFlags()
-            if case_sensitive:
-                flags |= QTextDocument.FindCaseSensitively
-            if whole_words:
-                flags |= QTextDocument.FindWholeWords
-
-            # 获取查找方向
-            if self.find_dialog.direction_combobox.currentText() == "向上查找":
+        if not hasattr(self, 'find_dialog'):
+            return
+        try:
+            find_str, replace_str, case_sensitive, whole_words = self.find_dialog.get_find_replace_texts()
+            if not find_str:
+                return
+            flags = self._build_find_flags(case_sensitive, whole_words)
+            backward = self.find_dialog.direction_combobox.currentText() == "向上查找"
+            if backward:
                 flags |= QTextDocument.FindBackward
 
-            cursor = self.text_edit.textCursor()
             document = self.text_edit.document()
-            cursor = document.find(find_str, cursor, flags)
-            if cursor.isNull():
-                # 如果查找不到，从文档的另一端重新查找一次
-                if flags & QTextDocument.FindBackward:
+            cursor = self.text_edit.textCursor()
+            match_cursor = document.find(find_str, cursor, flags)
+            if match_cursor.isNull():
+                cursor = QTextCursor(document)
+                if backward:
                     cursor.movePosition(QTextCursor.End)
                 else:
                     cursor.movePosition(QTextCursor.Start)
-
-                cursor = document.find(find_str, cursor, flags)
-                if cursor.isNull():
-                    QMessageBox.information(self, '查找', f'这已经是第一个 "{find_str}"')
-                    self.update_result_label(0, 0)
-                else:
-                    cursor.insertText(replace_str)
-                    cursor.movePosition(QTextCursor.PreviousCharacter, QTextCursor.KeepAnchor, len(replace_str))
-                    self.text_edit.setTextCursor(cursor)
-                    self.update_result_label(cursor)
-            else:
-                cursor.insertText(replace_str)
-                cursor.movePosition(QTextCursor.PreviousCharacter, QTextCursor.KeepAnchor, len(replace_str))
-                self.text_edit.setTextCursor(cursor)
-                self.update_result_label(cursor)
+                match_cursor = document.find(find_str, cursor, flags)
+                if match_cursor.isNull():
+                    QMessageBox.information(self, '替换', f'未找到 "{find_str}"')
+                    self.update_result_label(force_recount=True)
+                    return
+            match_cursor.insertText(replace_str)
+            if replace_str:
+                match_cursor.movePosition(QTextCursor.PreviousCharacter, QTextCursor.KeepAnchor, len(replace_str))
+            self.text_edit.setTextCursor(match_cursor)
+            self.update_result_label(match_cursor, force_recount=True)
+        except Exception as exc:
+            self.show_error_dialog('替换', f'替换失败: {exc}')
 
     def replace_all_text(self):
-        find_str, replace_str, case_sensitive, whole_words = self.find_dialog.get_find_replace_texts()
-        if find_str:
-            flags = QTextDocument.FindFlags()
-            if case_sensitive:
-                flags |= QTextDocument.FindCaseSensitively
-            if whole_words:
-                flags |= QTextDocument.FindWholeWords
-
-            cursor = self.text_edit.textCursor()
+        if not hasattr(self, 'find_dialog'):
+            return
+        try:
+            find_str, replace_str, case_sensitive, whole_words = self.find_dialog.get_find_replace_texts()
+            if not find_str:
+                QMessageBox.information(self, '替换', '请先输入需要查找的文本。')
+                return
+            flags = self._build_find_flags(case_sensitive, whole_words)
             document = self.text_edit.document()
-            replacements = 0
-            while True:
-                cursor = document.find(find_str, cursor, flags)
-                if cursor.isNull():
-                    break
-                cursor.insertText(replace_str)
-                replacements += 1
-
-            self.update_result_label(replacements, replacements)
-
+            cursor = QTextCursor(document)
+            cursor.beginEditBlock()
+            try:
+                search_cursor = QTextCursor(document)
+                search_cursor.movePosition(QTextCursor.Start)
+                replacements = 0
+                while True:
+                    match_cursor = document.find(find_str, search_cursor, flags)
+                    if match_cursor.isNull():
+                        break
+                    match_cursor.insertText(replace_str)
+                    replacements += 1
+                    search_cursor = match_cursor
+            finally:
+                cursor.endEditBlock()
+            self.update_result_label(force_recount=True)
             if replacements > 0:
                 QMessageBox.information(self, '替换', f'全部替换完成，共替换了 {replacements} 个匹配项。')
             else:
                 QMessageBox.information(self, '查找', f'未找到 "{find_str}"')
+        except Exception as exc:
+            self.show_error_dialog('替换', f'全部替换失败: {exc}')
 
-    def update_result_label(self, current_match=0, total_matches=0):
-        """更新结果显示标签"""
-        if current_match == 0 or total_matches == 0:
-            # 重新计算匹配项的总数和当前索引
-            find_str, _, case_sensitive, whole_words = self.find_dialog.get_find_replace_texts()
-            if find_str:
-                flags = QTextDocument.FindFlags()
-                if case_sensitive:
-                    flags |= QTextDocument.FindCaseSensitively
-                if whole_words:
-                    flags |= QTextDocument.FindWholeWords
+    def update_result_label(self, cursor=None, force_recount=False):
+        if not hasattr(self, 'find_dialog'):
+            return
+        find_str, _, case_sensitive, whole_words = self.find_dialog.get_find_replace_texts()
+        if not find_str:
+            self.find_dialog.result_label.setText("0/0")
+            self.reset_find_cache()
+            return
+        key = (find_str, case_sensitive, whole_words)
+        if force_recount or self.find_cache.get("key") != key:
+            matches = self._collect_matches(find_str, case_sensitive, whole_words)
+            self.find_cache = {"key": key, "matches": matches}
+        matches = self.find_cache.get("matches", [])
+        total_matches = len(matches)
+        if total_matches == 0:
+            self.find_dialog.result_label.setText("0/0")
+            return
+        current_cursor = cursor or self.text_edit.textCursor()
+        current_index = self._determine_current_match(current_cursor, matches)
+        self.find_dialog.result_label.setText(f"{current_index}/{total_matches}")
 
-                document = self.text_edit.document()
-                total_matches = 0
-                current_match = 0
+    def _build_find_flags(self, case_sensitive, whole_words):
+        flags = QTextDocument.FindFlags()
+        if case_sensitive:
+            flags |= QTextDocument.FindCaseSensitively
+        if whole_words:
+            flags |= QTextDocument.FindWholeWords
+        return flags
 
-                cursor = QTextCursor(document)
-                while not cursor.isNull():
-                    cursor = document.find(find_str, cursor, flags)
-                    if cursor.isNull():
-                        break
-                    total_matches += 1
-                    if cursor == self.text_edit.textCursor():
-                        current_match = total_matches
+    def _collect_matches(self, find_str, case_sensitive, whole_words):
+        document = self.text_edit.document()
+        cursor = QTextCursor(document)
+        cursor.movePosition(QTextCursor.Start)
+        flags = self._build_find_flags(case_sensitive, whole_words)
+        matches = []
+        while True:
+            cursor = document.find(find_str, cursor, flags)
+            if cursor.isNull():
+                break
+            matches.append((cursor.selectionStart(), cursor.selectionEnd()))
+        return matches
 
-        self.find_dialog.result_label.setText(f"{current_match}/{total_matches}")
+    def _determine_current_match(self, cursor, matches):
+        start = cursor.selectionStart()
+        end = cursor.selectionEnd()
+        for index, (match_start, match_end) in enumerate(matches, start=1):
+            if match_start == start and match_end == end:
+                return index
+        return 0
 
     def bold_text(self):
         cursor = self.text_edit.textCursor()
@@ -815,41 +840,65 @@ class YunjiEditor(QMainWindow):
         return format_
 
     def open_settings_dialog(self):
-        font, ok = QFontDialog.getFont(self.text_edit.font(), self, "字体设置")
-        if ok:
-            self.text_edit.setFont(font)
-    
+        try:
+            font, ok = QFontDialog.getFont(self.text_edit.font(), self, "字体设置")
+            if ok:
+                self.text_edit.setFont(font)
+        except Exception as exc:
+            self.show_error_dialog('字体设置', f'无法打开字体设置: {exc}')
+
     def toggle_line_numbers(self):
-        self.text_edit.line_numbers_visible = self.show_line_numbers_action.isChecked()
-        self.text_edit.updateLineNumberAreaWidth(0)
-        self.text_edit.update()
-    
+        try:
+            self.text_edit.line_numbers_visible = self.show_line_numbers_action.isChecked()
+            self.text_edit.updateLineNumberAreaWidth(0)
+            self.text_edit.update()
+        except Exception as exc:
+            self.show_error_dialog('行号', f'切换行号显示失败: {exc}')
+
     def toggle_auto_wrap(self, checked):
         self.text_edit.setLineWrapMode(QPlainTextEdit.WidgetWidth if checked else QPlainTextEdit.NoWrap)
 
     def set_line_number_color(self):
-        color = QColorDialog.getColor()
-        if color.isValid():
-            self.text_edit.lineNumberColor = color
-            self.text_edit.lineNumberArea.update()
-    
+        try:
+            color = QColorDialog.getColor()
+            if color.isValid():
+                self.text_edit.lineNumberColor = color
+                self.text_edit.lineNumberArea.update()
+        except Exception as exc:
+            self.show_error_dialog('行号颜色', f'设置行号颜色失败: {exc}')
+
     def set_text_color(self):
-        color = QColorDialog.getColor()
-        if color.isValid():
-            # 获取颜色的 RGB 值
-            r, g, b, _ = color.getRgb()
+        try:
+            color = QColorDialog.getColor()
+            if color.isValid():
+                # 获取颜色的 RGB 值
+                r, g, b, _ = color.getRgb()
 
-            # 计算颜色的亮度（使用感知亮度公式）
-            brightness = (r * 0.299 + g * 0.587 + b * 0.114)
+                # 计算颜色的亮度（使用感知亮度公式）
+                brightness = (r * 0.299 + g * 0.587 + b * 0.114)
 
-            # 根据亮度设置相应的背景色
-            if brightness > 186:  # 如果颜色较亮，则设置背景为黑色
-                background_color = '#000000'  # 黑色
-            else:  # 如果颜色较暗，则设置背景为白色
-                background_color = '#FFFFFF'  # 白色
+                # 根据亮度设置相应的背景色
+                if brightness > 186:  # 如果颜色较亮，则设置背景为黑色
+                    background_color = '#000000'  # 黑色
+                else:  # 如果颜色较暗，则设置背景为白色
+                    background_color = '#FFFFFF'  # 白色
 
-            # 设置文本颜色和背景颜色
-            self.text_edit.setStyleSheet(f'color: {color.name()}; background-color: {background_color};')
+                # 设置文本颜色和背景颜色
+                self.text_edit.setStyleSheet(f'color: {color.name()}; background-color: {background_color};')
+        except Exception as exc:
+            self.show_error_dialog('文本颜色', f'设置文本颜色失败: {exc}')
+
+    def handle_document_modified(self):
+        self.status_label_doc.setText("文档状态: 已修改")
+        self.update_file_size()
+        self.is_saved = False
+
+    def update_insert_overwrite_mode(self):
+        try:
+            mode = "OVR" if self.text_edit.overwriteMode() else "INS"
+            self.status_label_insert_mode.setText(mode)
+        except Exception as exc:
+            print(f"更新插入/改写状态失败: {exc}")
 
     def closeEvent(self, event):
         if not self.is_saved  and self.text_edit.document().isModified():  # 检查文本内容是否被修改过
@@ -864,14 +913,37 @@ class YunjiEditor(QMainWindow):
 
     def on_text_changed(self):
         self.is_saved = False  # 文本更改后，设置未保存标志
-    
+        self.reset_find_cache()
+
     def update_file_size(self):
-        if self.file_path and os.path.isfile(self.file_path):
-            size = os.path.getsize(self.file_path)
-            human_readable_size = self.convert_size(size)
-            self.status_label_file_size.setText(f"文件大小: {human_readable_size}")
-        else:
+        try:
+            if self.file_path and os.path.isfile(self.file_path):
+                size = os.path.getsize(self.file_path)
+                human_readable_size = self.convert_size(size)
+                self.status_label_file_size.setText(f"文件大小: {human_readable_size}")
+            else:
+                self.status_label_file_size.setText("文件大小: N/A")
+        except Exception as exc:
             self.status_label_file_size.setText("文件大小: N/A")
+            print(f'更新文件大小失败: {exc}')
+
+    def show_error_dialog(self, title, message):
+        QMessageBox.critical(self, title, message)
+
+    def _read_file_with_fallback(self, file_path):
+        try:
+            with open(file_path, 'r', encoding='utf-8') as file:
+                return file.read(), 'utf-8'
+        except UnicodeDecodeError:
+            with open(file_path, 'rb') as file:
+                raw_data = file.read()
+                result = chardet.detect(raw_data) or {}
+                encoding = result.get('encoding') or 'utf-8'
+            with open(file_path, 'r', encoding=encoding, errors='ignore') as file:
+                return file.read(), encoding
+
+    def reset_find_cache(self):
+        self.find_cache = {"key": None, "matches": []}
 
     def convert_size(self, size):
         for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
