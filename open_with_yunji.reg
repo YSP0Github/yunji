@@ -1,0 +1,8 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_CLASSES_ROOT\*\shell\Open with Yunji]
+@="用 云记 打开"
+"Icon"="g:\yunji\yunji\editor.ico ,0"
+
+[HKEY_CLASSES_ROOT\*\shell\Open with Yunji\command]
+@="\"G:\miniconda3\envs\python_3.11\pythonw.exe\" -m yunji.editor \"%1\""

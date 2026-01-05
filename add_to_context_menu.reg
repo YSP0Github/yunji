@@ -1,8 +1,0 @@
-Windows Registry Editor Version 5.00
-
-[HKEY_CLASSES_ROOT\*\shell\Open with Yunji]
-@="Open with Yunji"
-"Icon"="\"H:\python_setup_pakeages\yunji\yunji\editor.ico\",0"
-
-[HKEY_CLASSES_ROOT\*\shell\Open with Yunji\command]
-@="\"D:\\Program Files\\Python311\\python.exe\" -m yunji.editor \"%1\""

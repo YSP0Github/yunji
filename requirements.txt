@@ -3,3 +3,4 @@
 
 ```plaintext
 PyQt5==5.15.9
+chardet

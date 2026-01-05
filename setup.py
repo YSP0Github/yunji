@@ -8,7 +8,7 @@ with open('README.md', encoding='utf-8') as f:
 
 setup(
     name='yunji', 
-    version='0.1',
+    version='0.4',
     author="Yun Song",
     author_email="ysp@cug.edu.cn",
     description="A PyQt5-based text editor",
@@ -18,6 +18,7 @@ setup(
     packages=find_packages(),
     install_requires=[
         'PyQt5',
+	    'chardet',
     ],
     entry_points={
         'console_scripts': [
