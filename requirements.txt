@@ -1,6 +1,2 @@
- 
-### requirements.txt
-
-```plaintext
-PyQt5==5.15.9
-chardet
+PyQt5>=5.15.9
+chardet>=5.2.0

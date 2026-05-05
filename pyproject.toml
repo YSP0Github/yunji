@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yunji"
+version = "0.5.0"
+description = "A PyQt5-based lightweight text editor"
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MIT"
+authors = [
+  { name = "Yun Song", email = "ysp@cug.edu.cn" }
+]
+dependencies = [
+  "PyQt5>=5.15.9",
+  "chardet>=5.2.0",
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Operating System :: OS Independent",
+  "Topic :: Text Editors",
+]
+
+[project.urls]
+Homepage = "https://github.com/YSP0Github/yunji"
+Repository = "https://github.com/YSP0Github/yunji.git"
+
+[project.scripts]
+yunji = "yunji.editor:cli_editor"
+
+[tool.setuptools.packages.find]
+include = ["yunji*"]
+exclude = ["tests*", "build*", "dist*"]
+
+[tool.setuptools.package-data]
+yunji = ["images/*.png", "images/*.ico", "*.ico"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

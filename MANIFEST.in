@@ -1,0 +1,6 @@
+include LICENSE
+include README.md
+recursive-include yunji/images *.png *.ico
+include yunji/*.ico
+exclude .pypirc
+global-exclude __pycache__ *.py[cod] *.pyo

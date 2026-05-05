@@ -1,2 +1,30 @@
-.pypirc
+﻿.pypirc
 
+# Python caches
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Packaging/build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+
+# PyInstaller artifacts
+yunji/build/
+yunji/dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE / OS
+.vscode/
+.DS_Store
+Thumbs.db
